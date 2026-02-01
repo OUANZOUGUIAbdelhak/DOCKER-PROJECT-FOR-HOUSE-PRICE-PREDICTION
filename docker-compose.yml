@@ -1,0 +1,180 @@
+# ============================================================================
+# DOCKER COMPOSE CONFIGURATION
+# ============================================================================
+# Purpose: Orchestrate multiple containers and define their relationships
+#
+# What is Docker Compose?
+# - Tool for defining and running multi-container Docker applications
+# - Single file (docker-compose.yml) defines all services
+# - One command to start/stop everything: docker-compose up/down
+#
+# Why Use Docker Compose?
+# - Simplifies multi-container management
+# - Defines volumes, networks, environment variables in one place
+# - Reproducible environments (same config every time)
+# - Easy to share with team
+# ============================================================================
+
+version: '3.8'  # Docker Compose file format version
+
+# ----------------------------------------------------------------------------
+# SERVICES
+# ----------------------------------------------------------------------------
+# Services are containers that work together
+# Each service is a separate container
+# ----------------------------------------------------------------------------
+services:
+  
+  # --------------------------------------------------------------------------
+  # TRAINING SERVICE
+  # --------------------------------------------------------------------------
+  # Runs model training pipeline
+  # Builds once, runs once (or on-demand)
+  # --------------------------------------------------------------------------
+  training:
+    # Build configuration
+    build:
+      context: .                    # Build context (current directory)
+      dockerfile: docker/Dockerfile.train  # Path to Dockerfile
+    
+    # Container name (optional, for easier identification)
+    container_name: house-price-train
+    
+    # Volumes: Mount host directories to container
+    volumes:
+      # Models volume: Persist trained models on host
+      # Format: host_path:container_path
+      # ./models: Host directory (relative to docker-compose.yml)
+      # /app/models: Container directory
+      # Models saved in container → persisted on host
+      - ./models:/app/models
+      
+      # Data volume: Access dataset from host
+      # Training container reads data from host
+      # Data doesn't need to be in image (saves space)
+      - ./data:/app/data
+    
+    # Environment variables
+    environment:
+      - PYTHONUNBUFFERED=1  # Don't buffer Python output (see logs immediately)
+      - KAGGLE_USERNAME=${KAGGLE_USERNAME:-}  # From .env or empty
+      - KAGGLE_KEY=${KAGGLE_KEY:-}  # From .env or empty
+    
+    # Restart policy
+    # "no": Don't restart (training runs once)
+    restart: no
+    
+    # Command override (optional)
+    # Uncomment to run different command:
+    # command: ["python", "src/train.py", "--epochs", "100"]
+    
+    # Networks (optional, for service communication)
+    # Not needed here, but useful if services need to talk
+    # networks:
+    #   - ml-network
+  
+  # --------------------------------------------------------------------------
+  # INFERENCE SERVICE
+  # --------------------------------------------------------------------------
+  # Runs model inference (predictions)
+  # Can run continuously or on-demand
+  # --------------------------------------------------------------------------
+  inference:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.inference
+    
+    container_name: house-price-inference
+    
+    volumes:
+      # Models volume: Read trained models from host
+      # Same volume as training (shared between services)
+      # Training writes → Inference reads
+      - ./models:/app/models
+      
+      # Data volume: Access input data for predictions
+      - ./data:/app/data
+    
+    environment:
+      - PYTHONUNBUFFERED=1
+    
+    # Restart policy
+    # "unless-stopped": Restart if container stops (unless manually stopped)
+    # Good for production inference services
+    restart: unless-stopped
+    
+    # Default command: Show help
+    # Override when running: docker-compose run inference python inference/predict.py --input data/test.csv
+    command: ["python", "inference/predict.py", "--help"]
+    
+    # Dependencies (optional)
+    # Inference depends on training completing (models must exist)
+    # But we don't enforce this here (training might be manual)
+    # depends_on:
+    #   - training
+
+# ----------------------------------------------------------------------------
+# VOLUMES (NAMED VOLUMES)
+# ----------------------------------------------------------------------------
+# Named volumes are Docker-managed storage
+# Alternative to bind mounts (./models:/app/models)
+#
+# Why use named volumes?
+# - Docker manages location (works across platforms)
+# - Can be shared between containers easily
+# - Can be backed up/restored
+#
+# Why NOT use here?
+# - Bind mounts are simpler for development
+# - Easier to inspect files on host
+# - Better for local development
+#
+# Uncomment to use named volumes instead:
+# volumes:
+#   model-storage:
+#     driver: local
+#     driver_opts:
+#       type: none
+#       o: bind
+#       device: ./models
+# ----------------------------------------------------------------------------
+
+# ----------------------------------------------------------------------------
+# NETWORKS (OPTIONAL)
+# ----------------------------------------------------------------------------
+# Define custom networks for service communication
+# Not needed for this project (services don't communicate)
+#
+# Example (if services needed to talk):
+# networks:
+#   ml-network:
+#     driver: bridge
+# ----------------------------------------------------------------------------
+
+# ----------------------------------------------------------------------------
+# USAGE EXAMPLES
+# ----------------------------------------------------------------------------
+#
+# 1. Build all services:
+#    docker-compose build
+#
+# 2. Run training:
+#    docker-compose run --rm training
+#    (--rm removes container after it stops)
+#
+# 3. Run inference:
+#    docker-compose run --rm inference python inference/predict.py --input data/test.csv --output predictions.csv
+#
+# 4. Start inference service (keeps running):
+#    docker-compose up inference
+#
+# 5. Stop everything:
+#    docker-compose down
+#
+# 6. View logs:
+#    docker-compose logs training
+#    docker-compose logs inference
+#
+# 7. Rebuild after code changes:
+#    docker-compose build --no-cache training
+# ----------------------------------------------------------------------------

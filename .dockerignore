@@ -1,0 +1,57 @@
+# ============================================================================
+# DOCKER IGNORE FILE
+# ============================================================================
+# Files/directories listed here are EXCLUDED from Docker build context
+# This speeds up builds and reduces image size
+#
+# Why exclude these?
+# - Large files slow down build (data, models)
+# - Git files unnecessary in container
+# - IDE files unnecessary in container
+# ============================================================================
+
+# Data (will be mounted as volume)
+data/
+models/
+
+# Git
+.git/
+.gitignore
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Documentation (not needed in container)
+*.md
+README.md
+
+# Docker files (don't need to copy into container)
+docker/
+docker-compose.yml
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
