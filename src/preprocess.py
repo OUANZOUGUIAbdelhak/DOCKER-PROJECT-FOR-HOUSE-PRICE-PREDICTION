@@ -80,6 +80,11 @@ class HousePricePreprocessor:
         exclude_cols = ['Id', 'SalePrice']
         cols = [c for c in df.columns if c not in exclude_cols]
         
+        # First, identify data types
+        # String/object columns are NEVER numerical
+        string_cols = df[cols].select_dtypes(include=['object']).columns.tolist()
+        numeric_cols = df[cols].select_dtypes(include=[np.number]).columns.tolist()
+        
         # Ordinal features (ordered categories)
         # These have inherent order, so we use ordinal encoding, not one-hot
         ordinal_features = [
@@ -91,8 +96,8 @@ class HousePricePreprocessor:
             'Fence', 'Street', 'Alley', 'CentralAir'
         ]
         
-        # Filter to only features that exist in dataset
-        ordinal_features = [f for f in ordinal_features if f in cols]
+        # Filter to only features that exist in dataset AND are string type
+        ordinal_features = [f for f in ordinal_features if f in cols and f in string_cols]
         
         # Categorical features (no inherent order)
         # These get one-hot encoded
@@ -102,15 +107,32 @@ class HousePricePreprocessor:
             'Exterior2nd', 'MasVnrType', 'Foundation', 'Heating', 'Electrical',
             'GarageType', 'MiscFeature', 'SaleType', 'SaleCondition'
         ]
-        categorical_features = [f for f in categorical_features if f in cols]
+        categorical_features = [f for f in categorical_features if f in cols and f in string_cols]
         
-        # Numerical features (everything else)
-        numerical_features = [c for c in cols if c not in ordinal_features + categorical_features]
+        # Any remaining string columns that weren't classified go to categorical
+        remaining_string_cols = [c for c in string_cols 
+                                if c not in ordinal_features + categorical_features]
+        categorical_features.extend(remaining_string_cols)
+        
+        # Numerical features: only truly numeric columns that aren't ordinal/categorical
+        # Exclude any columns that might have been misclassified
+        numerical_features = [c for c in numeric_cols 
+                             if c not in ordinal_features + categorical_features]
+        
+        # Double-check: ensure no string columns in numerical
+        numerical_features = [c for c in numerical_features 
+                             if c not in string_cols]
         
         logger.info(f"Feature types identified:")
         logger.info(f"  Numerical: {len(numerical_features)}")
         logger.info(f"  Ordinal: {len(ordinal_features)}")
         logger.info(f"  Categorical: {len(categorical_features)}")
+        
+        # Log any potential issues
+        if len(numerical_features) == 0:
+            logger.warning("No numerical features found! Check data types.")
+        if len(ordinal_features) + len(categorical_features) == 0:
+            logger.warning("No categorical/ordinal features found! Check data types.")
         
         return numerical_features, categorical_features, ordinal_features
     
@@ -140,31 +162,55 @@ class HousePricePreprocessor:
         # Create preprocessing pipelines for each feature type
         
         # Numerical: Impute missing values with median, then standardize
-        numerical_pipeline = Pipeline([
-            ('imputer', SimpleImputer(strategy='median')),  # Median is robust to outliers
-            ('scaler', StandardScaler())  # Mean=0, Std=1
-        ])
+        # Only process if we have numerical features
+        if numerical_features:
+            # Ensure numerical features are actually numeric
+            numerical_features_clean = []
+            for feat in numerical_features:
+                if feat in X.columns:
+                    # Check if column is numeric
+                    if pd.api.types.is_numeric_dtype(X[feat]):
+                        numerical_features_clean.append(feat)
+                    else:
+                        logger.warning(f"Feature {feat} was classified as numerical but is not numeric. Skipping.")
+            
+            numerical_features = numerical_features_clean
+        
+        # Build transformers list (only include non-empty feature lists)
+        transformers = []
+        
+        # Numerical: Impute missing values with median, then standardize
+        if numerical_features:
+            numerical_pipeline = Pipeline([
+                ('imputer', SimpleImputer(strategy='median')),  # Median is robust to outliers
+                ('scaler', StandardScaler())  # Mean=0, Std=1
+            ])
+            transformers.append(('num', numerical_pipeline, numerical_features))
         
         # Ordinal: Impute with 'missing' category, then ordinal encode
-        ordinal_pipeline = Pipeline([
-            ('imputer', SimpleImputer(strategy='constant', fill_value='missing')),
-            ('encoder', OrdinalEncoder(handle_unknown='use_encoded_value', unknown_value=-1))
-        ])
+        if ordinal_features:
+            ordinal_pipeline = Pipeline([
+                ('imputer', SimpleImputer(strategy='constant', fill_value='missing')),
+                ('encoder', OrdinalEncoder(handle_unknown='use_encoded_value', unknown_value=-1))
+            ])
+            transformers.append(('ord', ordinal_pipeline, ordinal_features))
         
         # Categorical: Impute with 'missing', then one-hot encode
-        categorical_pipeline = Pipeline([
-            ('imputer', SimpleImputer(strategy='constant', fill_value='missing')),
-            ('encoder', OneHotEncoder(handle_unknown='ignore', sparse_output=False))  # One-hot encoding
-        ])
+        if categorical_features:
+            categorical_pipeline = Pipeline([
+                ('imputer', SimpleImputer(strategy='constant', fill_value='missing')),
+                ('encoder', OneHotEncoder(handle_unknown='ignore', sparse_output=False))  # One-hot encoding
+            ])
+            transformers.append(('cat', categorical_pipeline, categorical_features))
         
         # Combine all transformers
         # ColumnTransformer applies different transformers to different columns
+        # Only include transformers for features that exist
+        if not transformers:
+            raise ValueError("No features to process! Check feature type identification.")
+        
         self.preprocessor = ColumnTransformer(
-            transformers=[
-                ('num', numerical_pipeline, numerical_features),
-                ('ord', ordinal_pipeline, ordinal_features),
-                ('cat', categorical_pipeline, categorical_features)
-            ],
+            transformers=transformers,
             remainder='drop'  # Drop any columns not specified
         )
         

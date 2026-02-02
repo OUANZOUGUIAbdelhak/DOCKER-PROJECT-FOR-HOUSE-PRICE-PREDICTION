@@ -61,7 +61,7 @@ class DataLoader:
         
         How Kaggle API works:
         1. Requires kaggle.json credentials file
-        2. Location: ~/.kaggle/kaggle.json (Linux/Mac) or C:\Users\<user>\.kaggle\kaggle.json (Windows)
+        2. Location: ~/.kaggle/kaggle.json (Linux/Mac) or C:\\Users\\<user>\\.kaggle\\kaggle.json (Windows)
         3. Contains: {"username": "...", "key": "..."}
         
         What can go wrong?

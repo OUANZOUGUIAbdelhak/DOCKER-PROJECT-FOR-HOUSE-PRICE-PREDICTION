@@ -121,9 +121,17 @@ class HousePricePredictor:
         
         logger.info(f"Generating predictions for {len(X)} samples")
         
+        # Add missing features with default values
+        # The form only collects a subset, but preprocessor expects all features
+        X_filled = self._add_missing_features(X.copy())
+        
         # Preprocess (same as training)
-        X_processed = handle_missing_values(X.copy())
+        X_processed = handle_missing_values(X_filled)
         X_processed = create_features(X_processed)
+        
+        # CRITICAL: After feature engineering, ensure ALL expected columns exist
+        # create_features may have created some, but we need to ensure all are present
+        X_processed = self._ensure_all_expected_columns(X_processed)
         
         # Transform using fitted preprocessor
         X_transformed = self.preprocessor.transform(X_processed)
@@ -133,6 +141,202 @@ class HousePricePredictor:
         
         logger.info(f"Generated {len(predictions)} predictions")
         return predictions
+    
+    def _add_missing_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Add missing features with default values.
+        
+        The form only collects a subset of features, but the preprocessor
+        was trained on the full dataset. This function adds missing features
+        with sensible defaults.
+        
+        CRITICAL: The preprocessor's ColumnTransformer expects ALL columns
+        it was trained on. Missing columns cause "not in index" errors.
+        """
+        # Get all columns that the preprocessor expects
+        # The preprocessor was fitted on the full dataset, so we need all those columns
+        expected_columns = set()
+        
+        # Try to get expected columns from preprocessor's ColumnTransformer
+        if hasattr(self.preprocessor, 'preprocessor') and hasattr(self.preprocessor.preprocessor, 'transformers_'):
+            for name, transformer, columns in self.preprocessor.preprocessor.transformers_:
+                if name != 'remainder' and columns is not None:
+                    expected_columns.update(columns)
+        
+        # If we can't get from preprocessor, use comprehensive list
+        # Features that might be missing from form input
+        defaults = {
+            # Building class
+            'MSSubClass': 20,  # 1-STORY 1946 & NEWER ALL STYLES
+            'MSZoning': 'RL',  # Residential Low Density
+            
+            # Lot features
+            'LotFrontage': 70.0,
+            'LotShape': 'Reg',
+            'LandContour': 'Lvl',
+            'LotConfig': 'Inside',
+            'LandSlope': 'Gtl',
+            'Street': 'Pave',
+            'Alley': 'None',
+            'Utilities': 'AllPub',
+            'Exterior1st': 'VinylSd',
+            'Exterior2nd': 'VinylSd',
+            'MasVnrType': 'None',
+            'MasVnrArea': 0.0,
+            'ExterCond': 'TA',
+            'Foundation': 'PConc',
+            'BsmtQual': 'TA',
+            'BsmtCond': 'TA',
+            'BsmtExposure': 'No',
+            'BsmtFinType1': 'Unf',
+            'BsmtFinType2': 'Unf',
+            'BsmtFinSF1': 0.0,
+            'BsmtFinSF2': 0.0,
+            'BsmtUnfSF': 0.0,
+            'Heating': 'GasA',
+            'HeatingQC': 'TA',
+            'Electrical': 'SBrkr',
+            '1stFlrSF': None,  # Will infer
+            '2ndFlrSF': None,  # Will infer
+            'LowQualFinSF': 0.0,
+            'KitchenAbvGr': 1,
+            'Functional': 'Typ',
+            'FireplaceQu': 'None',
+            'GarageType': 'Attchd',
+            'GarageFinish': 'Unf',
+            'GarageQual': 'TA',
+            'GarageCond': 'TA',
+            'GarageYrBlt': None,  # Will infer
+            'WoodDeckSF': 0.0,
+            'OpenPorchSF': 0.0,
+            'EnclosedPorch': 0.0,
+            '3SsnPorch': 0.0,
+            'ScreenPorch': 0.0,
+            'PoolQC': 'None',
+            'Fence': 'None',
+            'MiscFeature': 'None',
+            'MiscVal': 0,
+            'SaleType': 'WD',
+            'SaleCondition': 'Normal',
+            'MoSold': 6,
+            'YrSold': 2010,
+            'Condition1': 'Norm',
+            'Condition2': 'Norm',
+            'RoofStyle': 'Gable',
+            'RoofMatl': 'CompShg',
+            'CentralAir': 'Y',
+            'PavedDrive': 'Y',
+        }
+        
+        # Add missing features
+        for feature, default_value in defaults.items():
+            if feature not in df.columns:
+                if default_value is None:
+                    # Infer from other features
+                    if feature == '1stFlrSF':
+                        # Estimate: if no basement info, assume 1st floor = GrLivArea
+                        if 'GrLivArea' in df.columns:
+                            df[feature] = df['GrLivArea'] if 'TotalBsmtSF' not in df.columns else df['GrLivArea'] * 0.6
+                        else:
+                            df[feature] = 1000
+                    elif feature == '2ndFlrSF':
+                        if 'GrLivArea' in df.columns and '1stFlrSF' in df.columns:
+                            df[feature] = (df['GrLivArea'] - df['1stFlrSF']).clip(lower=0)
+                        else:
+                            df[feature] = 0
+                    elif feature == 'GarageYrBlt':
+                        if 'YearBuilt' in df.columns:
+                            df[feature] = df['YearBuilt']
+                        else:
+                            df[feature] = 2000
+                    else:
+                        df[feature] = 0
+                else:
+                    df[feature] = default_value
+        
+        # Handle conditional defaults
+        if 'Fireplaces' in df.columns:
+            mask = df['Fireplaces'].fillna(0) == 0
+            if mask.any():
+                df.loc[mask, 'FireplaceQu'] = 'None'
+        if 'PoolArea' in df.columns:
+            mask = df['PoolArea'].fillna(0) == 0
+            if mask.any():
+                df.loc[mask, 'PoolQC'] = 'None'
+        
+        # CRITICAL: Ensure ALL expected columns exist
+        # Add any columns that are still missing (from expected_columns)
+        if expected_columns:
+            missing_cols = expected_columns - set(df.columns)
+            if missing_cols:
+                logger.warning(f"Adding {len(missing_cols)} missing expected columns: {list(missing_cols)[:10]}...")
+                for col in missing_cols:
+                    # Use defaults if available, otherwise infer type
+                    if col in defaults:
+                        val = defaults[col]
+                        if val is None:
+                            df[col] = 0
+                        else:
+                            df[col] = val
+                    else:
+                        # Infer from column name or use safe default
+                        # Features created by create_features (TotalSF, Age, etc.)
+                        if col == 'TotalSF':
+                            df[col] = df.get('GrLivArea', 0) + df.get('TotalBsmtSF', 0)
+                        elif col == 'Age':
+                            df[col] = df.get('YrSold', 2010) - df.get('YearBuilt', 2000)
+                        elif col == 'TotalBathrooms':
+                            df[col] = df.get('FullBath', 0) + 0.5 * df.get('HalfBath', 0) + df.get('BsmtFullBath', 0) + 0.5 * df.get('BsmtHalfBath', 0)
+                        elif col == 'Qual_x_Area':
+                            df[col] = df.get('OverallQual', 5) * df.get('GrLivArea', 1000)
+                        else:
+                            # Default: 0 for numeric, 'None' for likely categorical
+                            df[col] = 0
+        
+        logger.info(f"Added missing features. Final columns: {len(df.columns)}, Expected: {len(expected_columns) if expected_columns else 'unknown'}")
+        return df
+    
+    def _ensure_all_expected_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Ensure ALL columns expected by the preprocessor are present.
+        This is called AFTER feature engineering to catch any remaining missing columns.
+        """
+        # Get expected columns from preprocessor's ColumnTransformer
+        expected_columns = set()
+        if hasattr(self.preprocessor, 'preprocessor') and hasattr(self.preprocessor.preprocessor, 'transformers_'):
+            for name, transformer, columns in self.preprocessor.preprocessor.transformers_:
+                if name != 'remainder' and columns is not None:
+                    expected_columns.update(columns)
+        
+        if not expected_columns:
+            logger.warning("Could not determine expected columns from preprocessor")
+            return df
+        
+        # Find missing columns
+        missing_cols = expected_columns - set(df.columns)
+        
+        if missing_cols:
+            logger.warning(f"Adding {len(missing_cols)} missing expected columns after feature engineering: {list(missing_cols)}")
+            for col in missing_cols:
+                # Features created by create_features that might be missing
+                if col == 'TotalSF':
+                    df[col] = df.get('GrLivArea', 0) + df.get('TotalBsmtSF', 0) if 'GrLivArea' in df.columns else 0
+                elif col == 'Age':
+                    yr_sold = df.get('YrSold', 2010) if 'YrSold' in df.columns else 2010
+                    year_built = df.get('YearBuilt', 2000) if 'YearBuilt' in df.columns else 2000
+                    df[col] = yr_sold - year_built
+                elif col == 'TotalBathrooms':
+                    df[col] = (df.get('FullBath', 0) + 0.5 * df.get('HalfBath', 0) + 
+                               df.get('BsmtFullBath', 0) + 0.5 * df.get('BsmtHalfBath', 0))
+                elif col == 'Qual_x_Area':
+                    df[col] = df.get('OverallQual', 5) * df.get('GrLivArea', 1000)
+                else:
+                    # Default: 0 for numeric columns
+                    df[col] = 0
+                    logger.debug(f"Added missing column {col} with default value 0")
+        
+        logger.info(f"Ensured all expected columns present. Total columns: {len(df.columns)}, Expected: {len(expected_columns)}")
+        return df
     
     def predict_single(self, house_data: dict) -> float:
         """

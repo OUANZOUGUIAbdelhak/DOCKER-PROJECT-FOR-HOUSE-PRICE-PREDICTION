@@ -113,6 +113,63 @@ services:
     # depends_on:
     #   - training
 
+  # --------------------------------------------------------------------------
+  # API SERVICE (FastAPI Backend)
+  # --------------------------------------------------------------------------
+  # Serves ML model predictions via REST API
+  # Frontend communicates with this service
+  # --------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    
+    container_name: house-price-api
+    
+    volumes:
+      # Models volume: Read trained models
+      - ./models:/app/models
+    
+    ports:
+      # Expose API on port 8000
+      - "8000:8000"
+    
+    environment:
+      - PYTHONUNBUFFERED=1
+    
+    restart: unless-stopped
+    
+    # Health check (simple curl or wget)
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # --------------------------------------------------------------------------
+  # FRONTEND SERVICE (React App)
+  # --------------------------------------------------------------------------
+  # Beautiful React UI for testing the model
+  # Served via Nginx
+  # --------------------------------------------------------------------------
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    
+    container_name: house-price-frontend
+    
+    ports:
+      # Expose frontend on port 3000
+      - "3000:80"
+    
+    restart: unless-stopped
+    
+    # Frontend depends on API being available
+    depends_on:
+      - api
+
 # ----------------------------------------------------------------------------
 # VOLUMES (NAMED VOLUMES)
 # ----------------------------------------------------------------------------

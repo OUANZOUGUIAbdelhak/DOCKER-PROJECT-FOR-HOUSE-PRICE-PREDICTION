@@ -405,10 +405,15 @@ def main():
     # Check if data exists, if not, try to download
     try:
         train_df = loader.load_train_data()
+        logger.info("Training data loaded successfully from existing file")
     except FileNotFoundError:
-        logger.warning("Training data not found. Attempting to download...")
-        loader.download_kaggle_dataset()
-        train_df = loader.load_train_data()
+        logger.warning("Training data not found.")
+        logger.warning("Please ensure train.csv exists in data/raw/ directory")
+        logger.warning("You can download it manually from Kaggle or use download_data.py")
+        raise FileNotFoundError(
+            "Training data not found at data/raw/train.csv. "
+            "Please download the dataset first."
+        )
     
     loader.validate_schema(train_df)
     
