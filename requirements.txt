@@ -6,6 +6,9 @@ scikit-learn==1.3.2          # ML models (RandomForest, GradientBoosting, etc.)
 pandas==2.1.3                 # Data manipulation
 numpy==1.24.3                 # Numerical computing
 
+# Deep Learning
+tensorflow==2.15.0           # Neural network framework (Keras included)
+
 # Model serialization
 joblib==1.3.2                 # Better than pickle for sklearn models (handles numpy arrays efficiently)
 

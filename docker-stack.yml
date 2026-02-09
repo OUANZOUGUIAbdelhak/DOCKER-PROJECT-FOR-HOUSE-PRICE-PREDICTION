@@ -1,0 +1,137 @@
+# ============================================================================
+# DOCKER SWARM STACK CONFIGURATION
+# ============================================================================
+# Purpose: Deploy to Docker Swarm for multi-machine execution
+# Usage: docker stack deploy -c docker-stack.yml house-price-stack
+# ============================================================================
+#
+# Example Multi-Machine Deployment:
+#   Machine 1: Training + API services
+#   Machine 2: Frontend service
+#
+# Prerequisites:
+#   1. Initialize Swarm: docker swarm init
+#   2. Join nodes: docker swarm join --token <token> <manager-ip>
+#   3. Deploy stack: docker stack deploy -c docker-stack.yml house-price-stack
+# ============================================================================
+
+version: '3.8'
+
+services:
+  
+  # --------------------------------------------------------------------------
+  # TRAINING SERVICE
+  # --------------------------------------------------------------------------
+  training:
+    image: house-price-training:latest
+    
+    # Build from local Dockerfile (build on manager node)
+    # Or push to registry and use: image: registry.example.com/house-price-training:latest
+    
+    volumes:
+      # Named volume for models (shared across nodes)
+      - model-storage:/app/models
+      # Bind mount for data (must exist on each node)
+      - type: bind
+        source: ./data
+        target: /app/data
+    
+    environment:
+      - PYTHONUNBUFFERED=1
+    
+    deploy:
+      replicas: 0  # Set to 1 when training, 0 otherwise
+      restart_policy:
+        condition: none  # Don't restart after completion
+      placement:
+        constraints:
+          - node.role == manager  # Run on manager node
+    
+    # Command to train selected model
+    command: ["python", "train.py", "--model", "gradient_boosting"]
+  
+  # --------------------------------------------------------------------------
+  # API SERVICE
+  # --------------------------------------------------------------------------
+  api:
+    image: house-price-api:latest
+    
+    volumes:
+      # Shared model volume
+      - model-storage:/app/models
+    
+    ports:
+      - target: 8000
+        published: 8000
+        protocol: tcp
+        mode: ingress
+    
+    environment:
+      - PYTHONUNBUFFERED=1
+    
+    deploy:
+      replicas: 2  # Scale API across multiple nodes
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.role == worker  # Run on worker nodes
+      update_config:
+        parallelism: 1
+        delay: 10s
+    
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+  
+  # --------------------------------------------------------------------------
+  # FRONTEND SERVICE
+  # --------------------------------------------------------------------------
+  frontend:
+    image: house-price-frontend:latest
+    
+    ports:
+      - target: 80
+        published: 3000
+        protocol: tcp
+        mode: ingress
+    
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.role == worker  # Can run on different node than API
+    
+    depends_on:
+      - api
+
+# --------------------------------------------------------------------------
+# VOLUMES
+# --------------------------------------------------------------------------
+# Named volume for model persistence across nodes
+# Docker Swarm manages this volume across the cluster
+# --------------------------------------------------------------------------
+volumes:
+  model-storage:
+    driver: local
+    # For production, use a shared storage driver:
+    # driver: nfs
+    # driver_opts:
+    #   type: nfs
+    #   o: addr=nfs-server.example.com
+    #   device: ":/exports/models"
+
+# --------------------------------------------------------------------------
+# NETWORKS (Optional)
+# --------------------------------------------------------------------------
+# Swarm creates an overlay network by default
+# Custom networks can be defined here if needed
+# --------------------------------------------------------------------------
+# networks:
+#   ml-network:
+#     driver: overlay

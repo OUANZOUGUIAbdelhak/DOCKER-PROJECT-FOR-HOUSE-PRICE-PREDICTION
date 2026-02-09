@@ -36,6 +36,19 @@ build/
 # ============================================================================
 .ipynb_checkpoints/
 *.ipynb_checkpoints
+notebooks/
+
+# ============================================================================
+# LOCAL TRAINING RESULTS
+# ============================================================================
+local_training/model_comparison/results.json
+local_training/experiments/
+
+# ============================================================================
+# DOCKER REQUIREMENTS (optional - can be generated)
+# ============================================================================
+# requirements-docker.txt files are tracked in git
+# But if you modify them locally, you might want to ignore
 
 # ============================================================================
 # IDE
@@ -68,14 +81,14 @@ Thumbs.db
 # ============================================================================
 # FRONTEND (React/Node)
 # ============================================================================
-frontend/node_modules/
-frontend/dist/
-frontend/.vite/
-frontend/.env.local
-frontend/.env.development.local
-frontend/.env.test.local
-frontend/.env.production.local
-frontend/npm-debug.log*
-frontend/yarn-debug.log*
-frontend/yarn-error.log*
-frontend/.pnpm-debug.log*
+docker_frontend/node_modules/
+docker_frontend/dist/
+docker_frontend/.vite/
+docker_frontend/.env.local
+docker_frontend/.env.development.local
+docker_frontend/.env.test.local
+docker_frontend/.env.production.local
+docker_frontend/npm-debug.log*
+docker_frontend/yarn-debug.log*
+docker_frontend/yarn-error.log*
+docker_frontend/.pnpm-debug.log*

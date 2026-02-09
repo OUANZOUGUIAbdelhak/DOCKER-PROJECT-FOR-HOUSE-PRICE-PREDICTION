@@ -7,14 +7,14 @@ WORKDIR /app
 RUN apk add --no-cache python3 make g++
 
 # Copy package files first (for better caching)
-COPY frontend/package.json ./
+COPY docker_frontend/package.json ./
 
 # Install dependencies with verbose output and retry
 RUN npm install --verbose --no-audit --no-fund || \
     (echo "First install failed, retrying..." && npm install --verbose --no-audit --no-fund)
 
 # Copy source code
-COPY frontend/ .
+COPY docker_frontend/ .
 
 # Build app
 RUN npm run build
@@ -26,7 +26,7 @@ FROM nginx:alpine
 COPY --from=build /app/dist /usr/share/nginx/html
 
 # Copy nginx config
-COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
+COPY docker_frontend/nginx.conf /etc/nginx/conf.d/default.conf
 
 EXPOSE 80
 
